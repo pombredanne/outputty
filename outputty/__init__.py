@@ -15,10 +15,24 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+"""``outputty`` is a simple Python library that helps you importing, filtering
+and exporting data. It is composed by a main ``Table`` class and a lot of
+plugins that helps importing and exporting data to/from ``Table``.
+
+You can write your own plugin easily (see ``outputty/plugin_*.py`` for
+examples). Some examples of plugins are: CSV, text, HTML and histogram.
+"""
+
 import datetime
 import re
 import types
+from collections import Counter
 
+
+__version__ = '0.3.2'
+date_regex = re.compile('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+datetime_regex = re.compile('^[0-9]{4}-[0-9]{2}-[0-9]{2} '
+                            '[0-9]{2}:[0-9]{2}:[0-9]{2}$')
 
 def _str_decode(element, codec):
     if isinstance(element, str):
@@ -57,7 +71,7 @@ class Table(object):
     def __setitem__(self, item, value):
         if isinstance(item, (str, unicode)):
             if item not in self.headers:
-                raise KeyError
+                self.append_column(item, value)
             columns = zip(*self._rows)
             if not columns or len(value) != len(self):
                 raise ValueError
@@ -162,17 +176,23 @@ class Table(object):
     def __str__(self):
         return self.__unicode__().encode(self.output_encoding)
 
-    def to_list_of_dicts(self):
-        self.encode()
+    def to_list_of_dicts(self, encoding=''):
+        if encoding is not None:
+            self.encode(encoding or self.output_encoding)
         rows = [dict(zip(self.headers, row)) for row in self._rows]
-        self.decode(self.output_encoding)
+        if encoding is not None:
+            self.decode(encoding or self.output_encoding)
         return rows
 
     def _identify_type_of_data(self):
+        """Create ``self.types``, a ``dict`` in which each key is a table
+        header (from ``self.headers``) and value is a type in:
+        ``(int, float, datetime.date, datetime.datetime, str)``.
+
+        The types are identified trying to convert each column value to each
+        type.
+        """
         columns = zip(*self._rows)
-        date_regex = re.compile('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        datetime_regex = re.compile('^[0-9]{4}-[0-9]{2}-[0-9]{2} '
-                                    '[0-9]{2}:[0-9]{2}:[0-9]{2}$')
         for i, header in enumerate(self.headers):
             column_types = [int, float, datetime.date, datetime.datetime, str]
             cant_be = set()
@@ -181,6 +201,11 @@ class Table(object):
             except IndexError:
                 self.types[header] = str
             else:
+                types = list(set([type(value) for value in column]) -
+                             set([type(None)]))
+                if len(types) == 1 and types[0] not in (str, unicode):
+                    self.types[header] = types[0]
+                    continue
                 for value in column:
                     if value == '':
                         value = None
@@ -191,13 +216,13 @@ class Table(object):
                     except ValueError:
                         cant_be.add(int)
                     except TypeError:
-                        pass #None should pass
+                        pass  # None should pass
                     try:
                         converted = float(value)
                     except ValueError:
                         cant_be.add(float)
                     except TypeError:
-                        pass #None should pass
+                        pass  # None should pass
                     if value is not None:
                         if datetime_regex.match(unicode(value)) is None:
                             cant_be.add(datetime.datetime)
@@ -298,11 +323,11 @@ class Table(object):
 
     def extend(self, items):
         """Append a lot of items.
-        `items` should be a list of new rows, each row can be represented as
-        `list`, `tuple` or `dict`.
-        If one of the rows causes a `ValueError` (for example, because it has
+        ``items`` should be a list of new rows, each row can be represented as
+        ``list``, ``tuple`` or ``dict``.
+        If one of the rows causes a ``ValueError`` (for example, because it has
         more or less elements than it should), then nothing will be appended to
-        `Table`.
+        ``Table``.
         """
         new_items = []
         for item in items:
@@ -311,18 +336,18 @@ class Table(object):
             self.append(item)
 
     def __len__(self):
-        """Returns the number of rows. Same as `len(list)`."""
+        """Returns the number of rows. Same as ``len(list)``."""
         return len(self._rows)
 
     def count(self, row):
-        """Returns how many rows are equal to `row` in `Table`.
-        Same as `list.count`.
+        """Returns how many rows are equal to ``row`` in ``Table``.
+        Same as ``list.count``.
         """
         return self._rows.count(self._prepare_to_append(row))
 
     def index(self, x, i=None, j=None):
-        """Returns the index of row `x` in table (starting from zero).
-        Same as `list.index`.
+        """Returns the index of row ``x`` in table (starting from zero).
+        Same as ``list.index``.
         """
         x = self._prepare_to_append(x)
         if i is None and j is None:
@@ -333,36 +358,35 @@ class Table(object):
             return self._rows.index(x, i, j)
 
     def insert(self, index, row):
-        """Insert `row` in the position `index` on `Table`.
-        Same as `list.insert`.
-        `row` can be `list`, `tuple` or `dict`.
+        """Insert ``row`` in the position ``index``. Same as ``list.insert``.
+        ``row`` can be ``list``, ``tuple`` or ``dict``.
         """
         self._rows.insert(index, self._prepare_to_append(row))
 
     def pop(self, index=-1):
-        """Removes and returns row in position `index` on `Table`. `index`
-        defaults to -1.
-        Same as `list.pop`.
+        """Removes and returns row in position ``index``. ``index`` defaults
+        to -1. Same as ``list.pop``.
         """
         return self._rows.pop(index)
 
     def remove(self, row):
-        """Removes first occurrence of `row` on `Table`.
-        Raises `ValueError` if `row` is not found.
-        Same as `list.remove`.
+        """Removes first occurrence of ``row``. Raises ``ValueError`` if
+        ``row`` is not found. Same as ``list.remove``.
         """
         self._rows.remove(self._prepare_to_append(row))
 
     def reverse(self):
-        """Reverse the order of rows *in place* (does not return a new `Table`,
-        change the rows in this instance of `Table`).
-        Same as `list.reverse`.
+        """Reverse the order of rows *in place* (does not return a new
+        ``Table``, change the rows in this instance of ``Table``).
+        Same as ``list.reverse``.
         """
         self._rows.reverse()
 
     def append_column(self, name, values, position=None, row_as_dict=False):
-        """Append a column in the end of table"""
-        if (type(values) != types.FunctionType and len(values) != len(self)) or \
+        """Append a column at posision ``posision`` (defaults to end of
+        table)"""
+        if (type(values) != types.FunctionType and \
+            len(values) != len(self)) or \
            name in self.headers:
             raise ValueError
         if position is None:
@@ -375,7 +399,8 @@ class Table(object):
             if type(values) == types.FunctionType:
                 if row_as_dict:
                     value = values({header: row[index] \
-                                    for index, header in enumerate(self.headers)})
+                                    for index, header in \
+                                        enumerate(self.headers)})
                 else:
                     value = values(row)
             else:

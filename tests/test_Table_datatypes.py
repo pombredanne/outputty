@@ -28,12 +28,13 @@ class TestTableDataTypes(unittest.TestCase):
         self.assertEqual(table.types['ham'], str)
 
     def test_should_indentify_type_str_correctly(self):
-        table = Table(headers=['eggs', 'ham'])
+        table = Table(headers=['eggs', 'ham'], input_encoding='iso-8859-1')
         table.append(['spam eggs', 1])
         table.append(['spam spam', 3.14])
         table.append(['eggs spam', 'testing'])
         table.append(['spam spam', '2011-11-23'])
         table.append(['spam  ham', '2011-11-23 02:00:17'])
+        table.append([u'álvaro'.encode('iso-8859-1'), '2011-11-23 02:00:17'])
         table._identify_type_of_data()
         self.assertEqual(table.types['eggs'], str)
         self.assertEqual(table.types['ham'], str)
@@ -55,8 +56,10 @@ class TestTableDataTypes(unittest.TestCase):
 
     def test_should_indentify_type_float_correctly(self):
         table = Table(headers=['ham'])
-        table.append([1.0])
-        table.append([3.14])
+        table.append(["3"])
+        table.append(["3.14"])
+        table.append([""])
+        table.append(["2.71"])
         table._identify_type_of_data()
         self.assertEqual(table.types['ham'], float)
 
@@ -109,3 +112,16 @@ class TestTableDataTypes(unittest.TestCase):
         self.assertEquals(table[0][3],
                           datetime.datetime(2011, 1, 1, 2, 3, 4))
         self.assertEquals(table[0][4], 'asd')
+
+    def test_running_identify_data_type_with_normalized_types_should_return_correct_results(self):
+        table = Table(headers=['spam', 'eggs', 'ham', 'Monty', 'Python'])
+        table.append([1, 2.71, '2011-01-01', '2011-01-01 00:00:00', 'asd'])
+        table.append(['', '', '', '', ''])
+        table.normalize_types()
+        table._identify_type_of_data()
+        self.assertEquals(table.types['spam'], int)
+        self.assertEquals(table.types['eggs'], float)
+        self.assertEquals(table.types['ham'], datetime.date)
+        self.assertEquals(table.types['Monty'], datetime.datetime)
+        self.assertEquals(table.types['Python'], str)
+
